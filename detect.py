@@ -90,7 +90,7 @@ def run(
     webcam = source.isnumeric() or source.endswith('.streams') or (is_url and not is_file)
     screenshot = source.lower().startswith('screen')
     if is_url and is_file:
-        source = check_file(source)  # download
+        source = check_file(source)  # 寻找源测试文件 或者下载文件
 
     # Directories
     save_dir = increment_path(Path(project) / name, exist_ok=exist_ok)  # increment run

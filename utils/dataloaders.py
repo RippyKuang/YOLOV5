@@ -149,7 +149,7 @@ def create_dataloader(path,
     if rect and shuffle:
         LOGGER.warning('WARNING ⚠️ --rect is incompatible with DataLoader shuffle, setting shuffle=False')
         shuffle = False
-    with torch_distributed_zero_first(rank):  # init dataset *.cache only once if DDP
+    with torch_distributed_zero_first(rank):  # 只有主进程、加载数据
         dataset = LoadImagesAndLabels(
             path,
             imgsz,
@@ -509,20 +509,27 @@ class LoadImagesAndLabels(Dataset):
                 else:
                     raise FileNotFoundError(f'{prefix}{p} does not exist')
             self.im_files = sorted(x.replace('/', os.sep) for x in f if x.split('.')[-1].lower() in IMG_FORMATS)
-            # self.img_files = sorted([x for x in f if x.suffix[1:].lower() in IMG_FORMATS])  # pathlib
+            # self.img_files 存放所有图片路径，且排序好的
             assert self.im_files, f'{prefix}No images found'
         except Exception as e:
             raise Exception(f'{prefix}Error loading data from {path}: {e}\n{HELP_URL}') from e
 
         # Check cache
-        self.label_files = img2label_paths(self.im_files)  # labels
-        cache_path = (p if p.is_file() else Path(self.label_files[0]).parent).with_suffix('.cache')
+        self.label_files = img2label_paths(self.im_files)  # 根据图片路径找到标签路径
+        cache_path = (p if p.is_file() else Path(self.label_files[0]).parent).with_suffix('.cache') #把缓存文件放到label文件夹下面，并加上cache后缀
         try:
-            cache, exists = np.load(cache_path, allow_pickle=True).item(), True  # load dict
+            cache, exists = np.load(cache_path, allow_pickle=True).item(), True  # 加载缓存
             assert cache['version'] == self.cache_version  # matches current version
             assert cache['hash'] == get_hash(self.label_files + self.im_files)  # identical hash
         except Exception:
             cache, exists = self.cache_labels(cache_path, prefix), False  # run cache ops
+    #     cache是个字典,key的个数为图像个数+4,存储了每张图像对应的所有gt box标签和图像宽高,
+    #     以及cache的hash值等不太重要的信息存储的标签如下:
+    #     [array([[          0,       0.725,     0.69758,      0.1875,     0.47982],
+    #    [          0,     0.50391,     0.64675,     0.15781,     0.60762],
+    #    [          0,     0.36186,     0.73258,     0.14428,     0.41798],
+    #    [         29,     0.45219,     0.27519,    0.052734,    0.048498]], dtype=float32), (640, 446), []]
+
 
         # Display cache
         nf, nm, ne, nc, n = cache.pop('results')  # found, missing, empty, corrupt, total
@@ -536,7 +543,8 @@ class LoadImagesAndLabels(Dataset):
         # Read cache
         [cache.pop(k) for k in ('hash', 'version', 'msgs')]  # remove items
         labels, shapes, self.segments = zip(*cache.values())
-        nl = len(np.concatenate(labels, 0))  # number of labels
+        #label就是gt box的信息，包括类别的坐标。 shapes是图像宽高信息。 segments都是空。
+        nl = len(np.concatenate(labels, 0))  # label的数目, 增加一个副样本
         assert nl > 0 or not augment, f'{prefix}All labels empty in {cache_path}, can not start training. {HELP_URL}'
         self.labels = list(labels)
         self.shapes = np.array(shapes)
@@ -555,8 +563,8 @@ class LoadImagesAndLabels(Dataset):
 
         # Create indices
         n = len(self.shapes)  # number of images
-        bi = np.floor(np.arange(n) / batch_size).astype(int)  # batch index
-        nb = bi[-1] + 1  # number of batches
+        bi = np.floor(np.arange(n) / batch_size).astype(int)  # 每个样本都属于哪个batch
+        nb = bi[-1] + 1  # 一共有几个batch
         self.batch = bi  # batch index of image
         self.n = n
         self.indices = np.arange(n)
@@ -579,30 +587,30 @@ class LoadImagesAndLabels(Dataset):
 
         # Rectangular Training
         if self.rect:
-            # Sort by aspect ratio
+            #按宽高比排序
             s = self.shapes  # wh
-            ar = s[:, 1] / s[:, 0]  # aspect ratio
-            irect = ar.argsort()
+            ar = s[:, 1] / s[:, 0]  # 计算宽高比
+            irect = ar.argsort() # argsort, arg
             self.im_files = [self.im_files[i] for i in irect]
             self.label_files = [self.label_files[i] for i in irect]
             self.labels = [self.labels[i] for i in irect]
             self.segments = [self.segments[i] for i in irect]
             self.shapes = s[irect]  # wh
             ar = ar[irect]
-
+            #把宽高相近的放到一个batch里
             # Set training image shapes
-            shapes = [[1, 1]] * nb
+            shapes = [[1, 1]] * nb # nb是一共有几个batch
             for i in range(nb):
-                ari = ar[bi == i]
+                ari = ar[bi == i]   #这行没看懂
                 mini, maxi = ari.min(), ari.max()
                 if maxi < 1:
                     shapes[i] = [maxi, 1]
                 elif mini > 1:
-                    shapes[i] = [1, 1 / mini]
+                    shapes[i] = [1, 1 / mini]   
 
-            self.batch_shapes = np.ceil(np.array(shapes) * img_size / stride + pad).astype(int) * stride
+            self.batch_shapes = np.ceil(np.array(shapes) * img_size / stride + pad).astype(int) * stride  #每个batch最终输入网络的shape
 
-        # Cache images into RAM/disk for faster training
+        # 将数据集中所有图像读取进来，并等比缩放，保存到self.imgs里，当设置了本地保存时，保存为本地.npy文件
         if cache_images == 'ram' and not self.check_cache_ram(prefix=prefix):
             cache_images = False
         self.ims = [None] * n
@@ -691,9 +699,9 @@ class LoadImagesAndLabels(Dataset):
 
         hyp = self.hyp
         mosaic = self.mosaic and random.random() < hyp['mosaic']
-        if mosaic:
+        if mosaic:   #使用mosaic数据增强
             # Load mosaic
-            img, labels = self.load_mosaic(index)
+            img, labels = self.load_mosaic(index) #load_mosaic将随机选取4张图片组合成一张图片
             shapes = None
 
             # MixUp augmentation
@@ -702,7 +710,7 @@ class LoadImagesAndLabels(Dataset):
 
         else:
             # Load image
-            img, (h0, w0), (h, w) = self.load_image(index)
+            img, (h0, w0), (h, w) = self.load_image(index) #加载图片,并进行缩放，返回# im, hw_original, hw_resized
 
             # Letterbox
             shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
