@@ -50,9 +50,9 @@ class Detect(nn.Module):
     def __init__(self, nc=80, anchors=(), ch=(), inplace=True):  # detection layer
         super().__init__()
         self.nc = nc  # number of classes
-        self.no = nc + 5  # number of outputs per anchor
-        self.nl = len(anchors)  # number of detection layers
-        self.na = len(anchors[0]) // 2  # number of anchors
+        self.no = nc + 5  # number of outputs per anchor +xywh conf
+        self.nl = len(anchors)  # number of detection layers 每层有一个anchor
+        self.na = len(anchors[0]) // 2  # number of anchors 每个anchor有两个参数，所以除以二
         self.grid = [torch.empty(0) for _ in range(self.nl)]  # init grid
         self.anchor_grid = [torch.empty(0) for _ in range(self.nl)]  # init anchor grid
         self.register_buffer('anchors', torch.tensor(anchors).float().view(self.nl, -1, 2))  # shape(nl,na,2)
@@ -61,12 +61,15 @@ class Detect(nn.Module):
 
     def forward(self, x):
         z = []  # inference output
-        for i in range(self.nl):
-            x[i] = self.m[i](x[i])  # conv
+        #x是一个list，是detect层的输入，list的长度为3
+        #shape分别是(n, 128, 80, 80)， (n, 256, 40, 40), (n, 512, 20, 20)
+        for i in range(self.nl):   # nl:detect层的数目
+            x[i] = self.m[i](x[i])  # conv 输出 (bs,255,20,20)
             bs, _, ny, nx = x[i].shape  # x(bs,255,20,20) to x(bs,3,20,20,85)
             x[i] = x[i].view(bs, self.na, self.no, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
 
-            if not self.training:  # inference
+            if not self.training:  # inference 如果是推断
+                #预测的box的中心点x和y是相对位置, 在推理的时候,需要映射到原图上,因此需要先加上grid的坐标,再乘以stride映射回原图
                 if self.dynamic or self.grid[i].shape[2:4] != x[i].shape[2:4]:
                     self.grid[i], self.anchor_grid[i] = self._make_grid(nx, ny, i)
 
