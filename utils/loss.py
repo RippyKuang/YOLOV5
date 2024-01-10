@@ -188,8 +188,8 @@ class ComputeLoss:
         gain = torch.ones(7, device=self.device)  # 7个数，前6个数对应targets的第二维度6 normalized to gridspace gain
         #anchor的索引，shape为(3, gt box的数量)， 3行里，第一行全是0， 第2行全是1， 第三行全是2，表示每个gt box都对应到3个anchor上。
         ai = torch.arange(na, device=self.device).float().view(na, 1).repeat(1, nt)  # same as .repeat_interleave(nt)
-        targets = torch.cat((targets.repeat(na, 1, 1), ai[..., None]), 2)  # 加上anchor的索引，把target重复三边 append anchor indices
-
+        targets = torch.cat((targets.repeat(na, 1, 1), ai[..., None]), 2)  # 加上anchor的索引，把target重复三边 (3,n,7)
+         
         g = 0.5  # bias
         off = torch.tensor(
             [
@@ -207,10 +207,11 @@ class ComputeLoss:
             gain[2:6] = torch.tensor(shape)[[3, 2, 3, 2]]  # xyxy gain
 
             # Match targets to anchors
+            #2：6代表target里的xywh,因为是归一化后的,所以需要乘上xyxy来恢复原先的尺度
             t = targets * gain  # shape(3,n,7)
-            if nt:
+            if nt:  #nt是gt box的数量
                 # Matches
-                r = t[..., 4:6] / anchors[:, None]  # wh ratio
+                r = t[..., 4:6] / anchors[:, None]  # wh ratio shape为[3,n,2] 2是gt box的w和h与anchor的w和h的比值
                 j = torch.max(r, 1 / r).max(2)[0] < self.hyp['anchor_t']  # compare
                 # j = wh_iou(anchors, t[:, 4:6]) > model.hyp['iou_t']  # iou(3,n)=wh_iou(anchors(3,2), gwh(n,2))
                 t = t[j]  # filter
