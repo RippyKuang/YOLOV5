@@ -714,9 +714,10 @@ class LoadImagesAndLabels(Dataset):
 
             # Letterbox
             shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
-            img, ratio, pad = letterbox(img, shape, auto=False, scaleup=self.augment)
+            img, ratio, pad = letterbox(img, shape, auto=False, scaleup=self.augment)  #scaleup控制是否向上缩放, 输出最终的缩放后的图片
             shapes = (h0, w0), ((h / h0, w / w0), pad)  # for COCO mAP rescaling
 
+            # img缩放与补黑边后,label的框需要适配,xywhn2xyxy是将标注的label中归一化的xywh中心点+宽高->xyxy左上角+右下角坐标,再加上补边的偏移
             labels = self.labels[index].copy()
             if labels.size:  # normalized xywh to pixel xyxy format
                 labels[:, 1:] = xywhn2xyxy(labels[:, 1:], ratio[0] * w, ratio[1] * h, padw=pad[0], padh=pad[1])
@@ -731,6 +732,7 @@ class LoadImagesAndLabels(Dataset):
                                                  perspective=hyp['perspective'])
 
         nl = len(labels)  # number of labels
+        #xyxy左上角+右下角坐标 -> 归一化的xywh中心点+宽高， clip规范xyxy坐标在图片宽高内。
         if nl:
             labels[:, 1:5] = xyxy2xywhn(labels[:, 1:5], w=img.shape[1], h=img.shape[0], clip=True, eps=1E-3)
 
