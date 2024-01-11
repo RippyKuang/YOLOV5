@@ -16,7 +16,7 @@ Tutorial:   https://docs.ultralytics.com/yolov5/tutorials/train_custom_data
 """
 
 # 我来袅袅了
-# 我也来袅袅了
+# 我也了
 
 import argparse
 import math
