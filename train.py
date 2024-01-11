@@ -16,7 +16,7 @@ Tutorial:   https://docs.ultralytics.com/yolov5/tutorials/train_custom_data
 """
 
 # 我来袅袅了
-# 我也了
+# 我也来袅袅了
 
 import argparse
 import math
@@ -82,7 +82,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     callbacks.run('on_pretrain_routine_start')
 
     # Directories
-    w = save_dir / 'weights'  # weights dir
+    w = save_dir / 'weights'  # exp下面的weight文件夹
     (w.parent if evolve else w).mkdir(parents=True, exist_ok=True)  # make dir
     last, best = w / 'last.pt', w / 'best.pt'
 
@@ -130,7 +130,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     cuda = device.type != 'cpu'
     init_seeds(opt.seed + 1 + RANK, deterministic=True)
     with torch_distributed_zero_first(LOCAL_RANK):
-        data_dict = data_dict or check_dataset(data)  # check if None
+        data_dict = data_dict or check_dataset(data)  # 加载数据集
     train_path, val_path = data_dict['train'], data_dict['val']
     nc = 1 if single_cls else int(data_dict['nc'])  # number of classes
     names = {0: 'item'} if single_cls and len(data_dict['names']) != 1 else data_dict['names']  # class names
@@ -514,7 +514,6 @@ def main(opt, callbacks=Callbacks()):
     # Checks
     if RANK in {-1, 0}:
         print_args(vars(opt))
-        check_git_status()
         check_requirements(ROOT / 'requirements.txt')
 
     # Resume (from specified or most recent last.pt)

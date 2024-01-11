@@ -483,20 +483,20 @@ def check_font(font=FONT, progress=False):
 
 def check_dataset(data, autodownload=True):
     # Download, check and/or unzip dataset if not found locally
-
+    # data是数据集yaml的路径
     # Download (optional)
     extract_dir = ''
-    if isinstance(data, (str, Path)) and (is_zipfile(data) or is_tarfile(data)):
+    if isinstance(data, (str, Path)) and (is_zipfile(data) or is_tarfile(data)):   #如果是路径，并且是zip，那就把zip解压
         download(data, dir=f'{DATASETS_DIR}/{Path(data).stem}', unzip=True, delete=False, curl=False, threads=1)
         data = next((DATASETS_DIR / Path(data).stem).rglob('*.yaml'))
         extract_dir, autodownload = data.parent, False
 
     # Read yaml (optional)
-    if isinstance(data, (str, Path)):
+    if isinstance(data, (str, Path)): #读yaml
         data = yaml_load(data)  # dictionary
 
     # Checks
-    for k in 'train', 'val', 'names':
+    for k in 'train', 'val', 'names': #每个yaml文件里都要有这三个key
         assert k in data, emojis(f"data.yaml '{k}:' field missing ❌")
     if isinstance(data['names'], (list, tuple)):  # old array format
         data['names'] = dict(enumerate(data['names']))  # convert to dict
@@ -506,8 +506,8 @@ def check_dataset(data, autodownload=True):
     # Resolve paths
     path = Path(extract_dir or data.get('path') or '')  # optional 'path' default to '.'
     if not path.is_absolute():
-        path = (ROOT / path).resolve()
-        data['path'] = path  # download scripts
+        path = (ROOT / path).resolve()  
+        data['path'] = path  # 把Path变为绝对路径
     for k in 'train', 'val', 'test':
         if data.get(k):  # prepend path
             if isinstance(data[k], str):

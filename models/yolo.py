@@ -196,7 +196,7 @@ class DetectionModel(BaseModel):
         self.inplace = self.yaml.get('inplace', True)
 
         # Build strides, anchors
-        m = self.model[-1]  # Detect()
+        m = self.model[-1]  # Detect() 就是三层卷积
         if isinstance(m, (Detect, Segment)):
             s = 256  # 2x min stride
             m.inplace = self.inplace
@@ -307,9 +307,13 @@ class ClassificationModel(BaseModel):
 
 def parse_model(d, ch):  # model_dict, input_channels(3)
     # Parse a YOLOv5 model.yaml dictionary
+    # d是模型的yaml文件读出来的字典
     LOGGER.info(f"\n{'':>3}{'from':>18}{'n':>3}{'params':>10}  {'module':<40}{'arguments':<30}")
     anchors, nc, gd, gw, act, ch_mul = d['anchors'], d['nc'], d['depth_multiple'], d['width_multiple'], d.get(
         'activation'), d.get('channel_multiple')
+    #anchors shape  (3,6)
+    #nc 类别的数量
+
     if act:
         Conv.default_act = eval(act)  # redefine default activation, i.e. Conv.default_act = nn.SiLU()
         LOGGER.info(f"{colorstr('activation:')} {act}")  # print
