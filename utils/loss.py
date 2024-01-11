@@ -119,7 +119,12 @@ class ComputeLoss:
         self.device = device
 
     def __call__(self, p, targets):  # predictions, targets
-        #p 是每个预测头输出的结果 [batchsize ,anchor box数量, 检测头特征图大小]
+        #p 是每个预测头输出的结果
+        #    [p[0].shape： torch.Size([16, 3, 80, 80, 85])  [batchsize,anchor box数量,特征图大小,特征图大小,80+4+1]
+        #     p[1].shape： torch.Size([16, 3, 40, 40, 85])
+        #     p[2].shape： torch.Size([16, 3, 20, 20, 85])
+        #    ]
+ 
         # targets: gt box信息，维度是(n, 6)，其中n是整个batch的图片里gt box的数量，以下都以gt box数量为190来举例。
         # 6的每一个维度为(图片在batch中的索引， 目标类别， x, y, w, h)
         lcls = torch.zeros(1, device=self.device)  # class loss
@@ -188,7 +193,7 @@ class ComputeLoss:
         gain = torch.ones(7, device=self.device)  # 7个数，前6个数对应targets的第二维度6 normalized to gridspace gain
         #anchor的索引，shape为(3, gt box的数量)， 3行里，第一行全是0， 第2行全是1， 第三行全是2，表示每个gt box都对应到3个anchor上。
         ai = torch.arange(na, device=self.device).float().view(na, 1).repeat(1, nt)  # same as .repeat_interleave(nt)
-        targets = torch.cat((targets.repeat(na, 1, 1), ai[..., None]), 2)  # 加上anchor的索引，把target重复三边 (3,n,7)
+        targets = torch.cat((targets.repeat(na, 1, 1), ai[..., None]), 2)  # 加上anchor的索引，把target重复三边 (3,nt,7),
          
         g = 0.5  # bias
         off = torch.tensor(
@@ -204,6 +209,7 @@ class ComputeLoss:
 
         for i in range(self.nl):
             anchors, shape = self.anchors[i], p[i].shape
+            #shape  [batchsize,anchor box数量,特征图大小,特征图大小,80+4+1]
             gain[2:6] = torch.tensor(shape)[[3, 2, 3, 2]]  # xyxy gain
 
             # Match targets to anchors
@@ -211,12 +217,13 @@ class ComputeLoss:
             t = targets * gain  # shape(3,n,7)
             if nt:  #nt是gt box的数量
                 # Matches
-                r = t[..., 4:6] / anchors[:, None]  # wh ratio shape为[3,n,2] 2是gt box的w和h与anchor的w和h的比值
-                j = torch.max(r, 1 / r).max(2)[0] < self.hyp['anchor_t']  # compare
-                # j = wh_iou(anchors, t[:, 4:6]) > model.hyp['iou_t']  # iou(3,n)=wh_iou(anchors(3,2), gwh(n,2))
-                t = t[j]  # filter
+                r = t[..., 4:6] / anchors[:, None]  # shape为[3,nt,2] 2是gt box的w和h与anchor的w和h的比值
+                j = torch.max(r, 1 / r).max(2)[0] < self.hyp['anchor_t']  #当gt box的w和h与anchor的w和h的比值比设置的超参数anchor_t大时，则此gt box去除
+                # j的形状是(3,nt),里面的值均为true或false
+                t = t[j]  # 过滤掉不合适的gtbox
 
                 # Offsets
+                # t的每一个维度为(图片在batch中的索引， 目标类别， x, y, w, h,anchor的索引)
                 gxy = t[:, 2:4]  # grid xy
                 gxi = gain[[2, 3]] - gxy  # inverse
                 j, k = ((gxy % 1 < g) & (gxy > 1)).T
