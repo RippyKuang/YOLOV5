@@ -696,8 +696,8 @@ def labels_to_class_weights(labels, nc=80):
     # Get class weights (inverse frequency) from training labels
     if labels[0] is None:  # no labels loaded
         return torch.Tensor()
-
-    labels = np.concatenate(labels, 0)  # labels.shape = (866643, 5) for COCO
+    
+    labels = np.concatenate(labels, 0)  # labels.shape = (866643, 5) for COCO ，labels形状是（数据集的数量，标签的内容）
     classes = labels[:, 0].astype(int)  # labels = [class xywh]
     weights = np.bincount(classes, minlength=nc)  # occurrences per class
 
