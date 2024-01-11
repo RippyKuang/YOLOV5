@@ -168,7 +168,7 @@ def create_dataloader(path,
     batch_size = min(batch_size, len(dataset))
     nd = torch.cuda.device_count()  # number of CUDA devices
     nw = min([os.cpu_count() // max(nd, 1), batch_size if batch_size > 1 else 0, workers])  # number of workers
-    sampler = None if rank == -1 else SmartDistributedSampler(dataset, shuffle=shuffle)
+    sampler = None if rank == -1 else SmartDistributedSampler(dataset, shuffle=shuffle) # 一张卡的rank都是负一
     loader = DataLoader if image_weights else InfiniteDataLoader  # only DataLoader allows for attribute updates
     generator = torch.Generator()
     generator.manual_seed(6148914691236517205 + seed + RANK)
@@ -509,13 +509,13 @@ class LoadImagesAndLabels(Dataset):
                 else:
                     raise FileNotFoundError(f'{prefix}{p} does not exist')
             self.im_files = sorted(x.replace('/', os.sep) for x in f if x.split('.')[-1].lower() in IMG_FORMATS)
-            # self.img_files 存放所有图片路径，且排序好的
+            # self.img_files 存放所有图片绝对路径，且排序好的
             assert self.im_files, f'{prefix}No images found'
         except Exception as e:
             raise Exception(f'{prefix}Error loading data from {path}: {e}\n{HELP_URL}') from e
 
         # Check cache
-        self.label_files = img2label_paths(self.im_files)  # 根据图片路径找到标签路径
+        self.label_files = img2label_paths(self.im_files)  # 根据图片路径找到标签路径，也是绝对路径
         cache_path = (p if p.is_file() else Path(self.label_files[0]).parent).with_suffix('.cache') #把缓存文件放到label文件夹下面，并加上cache后缀
         try:
             cache, exists = np.load(cache_path, allow_pickle=True).item(), True  # 加载缓存
@@ -548,8 +548,8 @@ class LoadImagesAndLabels(Dataset):
         assert nl > 0 or not augment, f'{prefix}All labels empty in {cache_path}, can not start training. {HELP_URL}'
         self.labels = list(labels)
         self.shapes = np.array(shapes)
-        self.im_files = list(cache.keys())  # update
-        self.label_files = img2label_paths(cache.keys())  # update
+        self.im_files = list(cache.keys())  # im_files是图片的绝对路径
+        self.label_files = img2label_paths(cache.keys())  # 标签文件的绝对路径
 
         # Filter images
         if min_items:
@@ -591,7 +591,7 @@ class LoadImagesAndLabels(Dataset):
             s = self.shapes  # wh
             ar = s[:, 1] / s[:, 0]  # 计算宽高比
             irect = ar.argsort() # argsort, arg
-            self.im_files = [self.im_files[i] for i in irect]
+            self.im_files = [self.im_files[i] for i in irect]  #按宽高比排序
             self.label_files = [self.label_files[i] for i in irect]
             self.labels = [self.labels[i] for i in irect]
             self.segments = [self.segments[i] for i in irect]
@@ -601,7 +601,7 @@ class LoadImagesAndLabels(Dataset):
             # Set training image shapes
             shapes = [[1, 1]] * nb # nb是一共有几个batch
             for i in range(nb):
-                ari = ar[bi == i]   #这行没看懂
+                ari = ar[bi == i]   #取出排序后的第一个batch的图片对应的宽高比 
                 mini, maxi = ari.min(), ari.max()
                 if maxi < 1:
                     shapes[i] = [maxi, 1]

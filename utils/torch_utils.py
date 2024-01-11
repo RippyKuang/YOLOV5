@@ -318,17 +318,17 @@ def copy_attr(a, b, include=(), exclude=()):
 def smart_optimizer(model, name='Adam', lr=0.001, momentum=0.9, decay=1e-5):
     # YOLOv5 3-param group optimizer: 0) weights with decay, 1) weights no decay, 2) biases no decay
     g = [], [], []  # optimizer parameter groups
-    bn = tuple(v for k, v in nn.__dict__.items() if 'Norm' in k)  # normalization layers, i.e. BatchNorm2d()
-    for v in model.modules():
+    bn = tuple(v for k, v in nn.__dict__.items() if 'Norm' in k)  # 获得torch中所有支持的归一化层,i.e. BN层
+    for v in model.modules():  #g0 存卷积层，g1存bn层，g2存偏置层
         for p_name, p in v.named_parameters(recurse=0):
             if p_name == 'bias':  # bias (no decay)
                 g[2].append(p)
             elif p_name == 'weight' and isinstance(v, bn):  # weight (no decay)
                 g[1].append(p)
             else:
-                g[0].append(p)  # weight (with decay)
+                g[0].append(p)  # weight (with decay) 
 
-    if name == 'Adam':
+    if name == 'Adam':   #判断优化器类型
         optimizer = torch.optim.Adam(g[2], lr=lr, betas=(momentum, 0.999))  # adjust beta1 to momentum
     elif name == 'AdamW':
         optimizer = torch.optim.AdamW(g[2], lr=lr, betas=(momentum, 0.999), weight_decay=0.0)
@@ -339,7 +339,7 @@ def smart_optimizer(model, name='Adam', lr=0.001, momentum=0.9, decay=1e-5):
     else:
         raise NotImplementedError(f'Optimizer {name} not implemented.')
 
-    optimizer.add_param_group({'params': g[0], 'weight_decay': decay})  # add g0 with weight_decay
+    optimizer.add_param_group({'params': g[0], 'weight_decay': decay})  # 卷积层参数需要使用参数衰减
     optimizer.add_param_group({'params': g[1], 'weight_decay': 0.0})  # add g1 (BatchNorm2d weights)
     LOGGER.info(f"{colorstr('optimizer:')} {type(optimizer).__name__}(lr={lr}) with parameter groups "
                 f'{len(g[1])} weight(decay=0.0), {len(g[0])} weight(decay={decay}), {len(g[2])} bias')
