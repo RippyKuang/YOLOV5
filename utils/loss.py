@@ -102,7 +102,7 @@ class ComputeLoss:
 
         # Class label smoothing https://arxiv.org/pdf/1902.04103.pdf eqn 3
         self.cp, self.cn = smooth_BCE(eps=h.get('label_smoothing', 0.0))  # positive, negative BCE targets
-
+    
         # Focal loss
         g = h['fl_gamma']  # focal loss gamma
         if g > 0:
@@ -115,7 +115,7 @@ class ComputeLoss:
         self.na = m.na  # number of anchors
         self.nc = m.nc  # number of classes
         self.nl = m.nl  # number of layers
-        self.anchors = m.anchors
+        self.anchors = m.anchors  #[3,3,2]
         self.device = device
 
     def __call__(self, p, targets):  # predictions, targets
@@ -138,20 +138,20 @@ class ComputeLoss:
             tobj = torch.zeros(pi.shape[:4], dtype=pi.dtype, device=self.device)  # target obj
             #tobj shape: torch.Size([16, 3, 80, 80])
             #pi shape： torch.Size([16, 3, 80, 80, 85])
-            n = b.shape[0]  # number of targets 下文中的808
+            n = b.shape[0]  # number of targets 下文中的712
             if n:
-                #pi[b, a, gj, gi] shape ：808,85
+                #pi[b, a, gj, gi] shape 712,85
                 pxy, pwh, _, pcls = pi[b, a, gj, gi].tensor_split((2, 4, 5), dim=1)  # faster, requires torch 1.8.0
-                #pxy=ps[:, :2]
-                #pwh=ps[:, 2:4]
-                #_=ps[:, 4:5] 置信度
+                #pxy=pi[:, :2]
+                #pwh=pi[:, 2:4]
+                #_=pi[:, 4:5] 置信度
                 #pcls = 剩下80个分类
 
                 # Regression
                 pxy = pxy.sigmoid() * 2 - 0.5 #将预测的中心点坐标变换到-0.5到1.5之间
                 pwh = (pwh.sigmoid() * 2) ** 2 * anchors[i] #表示把预测框的宽和高限制在4倍的anchors内
                 pbox = torch.cat((pxy, pwh), 1)  # predicted box
-                #计算808个预测框与gt box的giou
+                #计算808个预测框与gt box的iou loss
                 iou = bbox_iou(pbox, tbox[i], CIoU=True).squeeze()  # iou(prediction, target)
                 lbox += (1.0 - iou).mean()  # iou loss
 
@@ -168,7 +168,7 @@ class ComputeLoss:
                 if self.nc > 1:  # cls loss (only if multiple classes)
                     #pcls shape:(808,80)
                     t = torch.full_like(pcls, self.cn, device=self.device)  # targets
-                    t[range(n), tcls[i]] = self.cp
+                    t[range(n), tcls[i]] = self.cp   #构造独热码
                     lcls += self.BCEcls(pcls, t)  # BCE
                     #self.cn和self.cp分别是标签平滑的负样本平滑标签和正样本平滑标签
 
@@ -196,13 +196,13 @@ class ComputeLoss:
         # 1、将gt box复制3份，原因是有三种长宽的anchor， 每种anchor都有gt box与其对应，也就是在筛选之前，一个gt box有三种anchor与其对应。
         # 2、过滤掉gt box的w和h与anchor的w和h的比值大于设置的超参数anchor_t的gt box。
         # 3、剩余的gt box，每个gt box使用至少三个方格来预测，一个是gt box中心点所在方格，另两个是中心点离的最近的两个方格，如下图
-        na, nt = self.na, targets.shape[0]  # number of anchors, targets
+        na, nt = self.na, targets.shape[0]  # number of anchors一般是3, nt是这个bs中所有的gt box数量
         tcls, tbox, indices, anch = [], [], [], []
         gain = torch.ones(7, device=self.device)  # 7个数，前6个数对应targets的第二维度6 normalized to gridspace gain
-        #anchor的索引，shape为(3, gt box的数量)， 3行里，第一行全是0， 第2行全是1， 第三行全是2，表示每个gt box都对应到3个anchor上。
+        #ai:anchor的索引，shape为(3, gt box的数量)， 3行里，第一行全是0， 第2行全是1， 第三行全是2，表示每个gt box都对应到3个anchor上。
         ai = torch.arange(na, device=self.device).float().view(na, 1).repeat(1, nt)  # same as .repeat_interleave(nt)
-        targets = torch.cat((targets.repeat(na, 1, 1), ai[..., None]), 2)  # 加上anchor的索引，把target重复三边 (3,nt,7),
-         
+        targets = torch.cat((targets.repeat(na, 1, 1), ai[..., None]), 2)  # 加上anchor的索引，把target重复三边 (3,nt,7),targets[0][0]和target[1][0]都属
+                                                                           #长度为7的张量，他们的差别只有最后一位 anchor的索引不同
         g = 0.5  # bias
         off = torch.tensor(
             [
@@ -215,17 +215,17 @@ class ComputeLoss:
             ],
             device=self.device).float() * g  # offsets 乘了个g，所以都是0.5
 
-        for i in range(self.nl):
-            anchors, shape = self.anchors[i], p[i].shape
+        for i in range(self.nl):    #对每个检测头进行遍历
+            anchors, shape = self.anchors[i], p[i].shape     #p[i]:[16,3,80,80,85] anchors:[3,3,2]
             #shape  [batchsize,anchor box数量,特征图大小,特征图大小,80+4+1]
-            gain[2:6] = torch.tensor(shape)[[3, 2, 3, 2]]  # xyxy gain
+            gain[2:6] = torch.tensor(shape)[[3, 2, 3, 2]]  # xyxy 重复shape的第三二位
 
             # Match targets to anchors
             #2：6代表target里的xywh,因为是归一化后的,所以需要乘上xyxy来恢复原先的尺度
-            t = targets * gain  # shape(3,n,7)
+            t = targets * gain  # target shape(3,n,7)
             if nt:  #nt是gt box的数量
                 # Matches
-                r = t[..., 4:6] / anchors[:, None]  # shape为[3,nt,2] 2是gt box的w和h与anchor的w和h的比值
+                r = t[..., 4:6] / anchors[:, None]  # shape为[3,nt,2] 2是gt box的w和h与anchor的w和h的比值 anchors[:, None] 的形状为3,1,2
                 j = torch.max(r, 1 / r).max(2)[0] < self.hyp['anchor_t']  #当gt box的w和h与anchor的w和h的比值比设置的超参数anchor_t大时，则此gt box去除
                 # j的形状是(3,nt),里面的值均为true或false
                 t = t[j]  # 过滤掉不合适的gtbox
@@ -237,15 +237,15 @@ class ComputeLoss:
                 #g是0.5
                 #下面是寻找另外两个负责该gt的gird
                 # 以图像左上角为原点的坐标，取中心点的小数部分，小数部分小于0.5的为ture，大于0.5的为false。
-                # j和k的shape都是(271)，true的位置分别表示靠近方格左边的gt box和靠近方格上方的gt box。 
+                # j和k的shape都是(239)，true的位置分别表示靠近方格左边的gt box和靠近方格上方的gt box。 
                 j, k = ((gxy % 1 < g) & (gxy > 1)).T 
                 #以图像右下角为原点的坐标，取中心点的小数部分，小数部分小于0.5的为ture，大于0.5的为false。
-                #l和m的shape都是(271)，true的位置分别表示靠近方格右边的gt box和靠近方格下方的gt box。
-                l, m = ((gxi % 1 < g) & (gxi > 1)).T
-                j = torch.stack((torch.ones_like(j), j, k, l, m)) #j的shape为(5, 271)
+                #l和m的shape都是(239)，true的位置分别表示靠近方格右边的gt box和靠近方格下方的gt box。
+                l, m = ((gxi % 1 < g) & (gxi > 1)).T   #大于1是为了防止超出边界
+                j = torch.stack((torch.ones_like(j), j, k, l, m)) #j的shape为(5, 239)
                 t = t.repeat((5, 1, 1))[j] #将t复制五遍，用j过滤
-                #之前的shape为(271, 7)， 这里将t复制5个，然后使用j来过滤，
-                # 假设过滤后的t shape为(808,7)
+                #之前的shape为(239, 7)， 这里将t复制5个，大小变成了[5, 239, 7]然后使用j来过滤，
+                # 假设过滤后的t shape为(712,7)
                 #第一个t是保留所有的gt box，因为上一步里面增加了一个全为true的维度，
                 #第二个t保留了靠近方格左边的gt box，
                 #第三个t保留了靠近方格上方的gt box，
@@ -258,7 +258,7 @@ class ComputeLoss:
                 # 第三个t保留的靠近方格上方的gt box，偏移为[0, 0.5]，即向上偏移0.5，则偏移到上边方格，表示用上边的方格来预测
                 # 第四个t保留的靠近方格右边的gt box，偏移为[-0.5, 0]，即向右偏移0.5，则偏移到右边方格，表示用右边的方格来预测
                 # 第五个t保留的靠近方格下边的gt box，偏移为[0, 0.5]，即向下偏移0.5，则偏移到下边方格，表示用下边的方格来预测
-                 #offsets的shape为(808, 2), 表示保留下来的808个gt box的x, y对应的偏移，
+                 #offsets的shape为(712, 2), 表示保留下来的712个gt box的x, y对应的偏移，
                 # 一个gt box的中心点x坐标要么是靠近方格左边，要么是靠近方格右边，y坐标要么是靠近方格上边，要么是靠近方格下边，
                 # 所以一个gt box在以上五个t里面，会有三个t是true。
                 # 也即一个gt box有三个方格来预测，一个是中心点所在方格，另两个是离的最近的两个方格。
@@ -268,23 +268,23 @@ class ComputeLoss:
 
             # Define
             bc, gxy, gwh, a = t.chunk(4, 1)  # (image, class), grid xy, grid wh, anchors
-            a, (b, c) = a.long().view(-1), bc.long().T  # anchors, image, class
+            a, (b, c) = a.long().view(-1), bc.long().T  # anchors:(712,1),表示anchor的索引, image, class
             gij = (gxy - offsets).long()  #转换成了整形，是预测该gtbox的网格坐标，这样下面gxy - gij得到的不是offsets，而是相对该网格的偏移量
             gi, gj = gij.T  # grid indices
 
-            # Append
+            # Append 一共三次循环，一次循环append一个最高维度
             indices.append((b, a, gj.clamp_(0, shape[2] - 1), gi.clamp_(0, shape[3] - 1)))  # image, anchor, grid
-            # indices的shape为(3, ([808], [808], [808], [808])), 
+            # indices的shape为(3, ([712], [712], [712], [712])), 
             # 4个808分别表示每个gt box(包括偏移后的gt box)在batch中的image index， anchor index， 预测该gt box的网格y坐标， 预测该gt box的网格x坐标。
             tbox.append(torch.cat((gxy - gij, gwh), 1))  # box
-            # 假如tbox的shape为(3, ([808, 4]))， 表示3个检测头对应的gt box的xywh， 其中x和y已经减去了预测方格的整数坐标，
+            # 假如tbox的shape为(3, ([712, 4]))， 表示3个检测头对应的gt box的xywh， 其中x和y已经减去了预测方格的整数坐标，
             # 比如原始的gt box的中心坐标是(51.7, 44.8)，则该gt box由方格(51, 44)，以及离中心点最近的两个方格(51, 45)和(52, 44)来预测(见build_targets函数里的解析),
             # 换句话说这三个方格预测的gt box是同一个，其中心点是(51.7, 44.8)，但tbox保存这三个方格预测的gt box的xy时，保存的是针对这三个方格的偏移量,
             # 分别是：
             #     (51.7 - 51 = 0.7, 44.8 - 44 = 0.8)
             #     (51.7 - 51 = 0.7, 44.8 - 45 = -0.2)
             #     (51.7 - 52 = -0.3, 44.8 - 44 = 0.8)
-            anch.append(anchors[a])  # shape为(3, ([808, 2]))， 表示每个检测头对应的808个gt box所对应的anchor。
-            tcls.append(c)  # shape为(3, 808), 表示3个检测头对应的gt box的类别。 
+            anch.append(anchors[a])  # shape为(3, ([712, 2]))， 表示每个检测头对应的712个gt box所对应的anchor。
+            tcls.append(c)  # shape为(3, 712), 表示3个检测头对应的gt box的类别。 
 
         return tcls, tbox, indices, anch

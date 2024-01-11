@@ -698,8 +698,8 @@ def labels_to_class_weights(labels, nc=80):
         return torch.Tensor()
     
     labels = np.concatenate(labels, 0)  # labels.shape = (866643, 5) for COCO ，labels形状是（数据集的数量，标签的内容）
-    classes = labels[:, 0].astype(int)  # labels = [class xywh]
-    weights = np.bincount(classes, minlength=nc)  # occurrences per class
+    classes = labels[:, 0].astype(int)  # 每个图片对应的类别 长度为图片的数目
+    weights = np.bincount(classes, minlength=nc)  # 每个类别的图片数量，长度为80
 
     # Prepend gridpoint count (for uCE training)
     # gpi = ((320 / 32 * np.array([1, 2, 4])) ** 2 * 3).sum()  # gridpoints per image
@@ -714,7 +714,7 @@ def labels_to_class_weights(labels, nc=80):
 def labels_to_image_weights(labels, nc=80, class_weights=np.ones(80)):
     # Produces image weights based on class_weights and image contents
     # Usage: index = random.choices(range(n), weights=image_weights, k=1)  # weighted image sample
-    class_counts = np.array([np.bincount(x[:, 0].astype(int), minlength=nc) for x in labels])
+    class_counts = np.array([np.bincount(x[:, 0].astype(int), minlength=nc) for x in labels]) #每张图片含有的物体，形状是(128,80),第二维表示物体出现的次数，没有就是0
     return (class_weights.reshape(1, nc) * class_counts).sum(1)
 
 
