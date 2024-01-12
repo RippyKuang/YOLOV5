@@ -57,6 +57,7 @@ RANK = int(os.getenv('RANK', -1))
 
 # Settings
 NUM_THREADS = min(8, max(1, os.cpu_count() - 1))  # number of YOLOv5 multiprocessing threads
+
 DATASETS_DIR = Path(os.getenv('YOLOv5_DATASETS_DIR', ROOT.parent / 'datasets'))  # global datasets directory
 AUTOINSTALL = str(os.getenv('YOLOv5_AUTOINSTALL', True)).lower() == 'true'  # global auto-install mode
 VERBOSE = str(os.getenv('YOLOv5_VERBOSE', True)).lower() == 'true'  # global verbose mode
@@ -910,9 +911,9 @@ def non_max_suppression(
     for xi, x in enumerate(prediction):  # image index, image inference
         # Apply constraints
         # x[((x[..., 2:4] < min_wh) | (x[..., 2:4] > max_wh)).any(1), 4] = 0  # width-height
-        x = x[xc[xi]]  # confidence
+        x = x[xc[xi]]  # 进行置信度过滤
 
-        # Cat apriori labels if autolabelling
+        # Cat apriori labels if autolabelling 先验标签是自动标签？看不懂喵
         if labels and len(labels[xi]):
             lb = labels[xi]
             v = torch.zeros((len(lb), nc + nm + 5), device=x.device)
@@ -922,7 +923,7 @@ def non_max_suppression(
             x = torch.cat((x, v), 0)
 
         # If none remain process next image
-        if not x.shape[0]:
+        if not x.shape[0]:  #如果不剩东西了
             continue
 
         # Compute conf
@@ -930,18 +931,18 @@ def non_max_suppression(
 
         # Box/Mask
         box = xywh2xyxy(x[:, :4])  # center_x, center_y, width, height) to (x1, y1, x2, y2)
-        mask = x[:, mi:]  # zero columns if no masks
+        mask = x[:, mi:]  # zero columns if no masks 这时mask的第二维度是0
 
         # Detections matrix nx6 (xyxy, conf, cls)
-        if multi_label:
+        if multi_label:  
             i, j = (x[:, 5:mi] > conf_thres).nonzero(as_tuple=False).T
             x = torch.cat((box[i], x[i, 5 + j, None], j[:, None].float(), mask[i]), 1)
         else:  # best class only
-            conf, j = x[:, 5:mi].max(1, keepdim=True)
-            x = torch.cat((box, conf, j.float(), mask), 1)[conf.view(-1) > conf_thres]
-
+            conf, j = x[:, 5:mi].max(1, keepdim=True)  #函数会返回两个tensor，第一个tensor是每行的最大值；第二个tensor是每行最大值的索引,即置信度最高的类别
+            x = torch.cat((box, conf, j.float(), mask), 1)[conf.view(-1) > conf_thres] #0-3是box，4是置信度，5是类别
+        # 从这里开始x的格式都是xyxy
         # Filter by class
-        if classes is not None:
+        if classes is not None:   #筛选出指定的class，nms仅仅对指定的class进行nms。
             x = x[(x[:, 5:6] == torch.tensor(classes, device=x.device)).any(1)]
 
         # Apply finite constraint
@@ -952,13 +953,13 @@ def non_max_suppression(
         n = x.shape[0]  # number of boxes
         if not n:  # no boxes
             continue
-        x = x[x[:, 4].argsort(descending=True)[:max_nms]]  # sort by confidence and remove excess boxes
+        x = x[x[:, 4].argsort(descending=True)[:max_nms]]  # 按照置信度降序排序，并且排除过多的框
 
         # Batched NMS
-        c = x[:, 5:6] * (0 if agnostic else max_wh)  # classes
-        boxes, scores = x[:, :4] + c, x[:, 4]  # boxes (offset by class), scores
-        i = torchvision.ops.nms(boxes, scores, iou_thres)  # NMS
-        i = i[:max_det]  # limit detections
+        c = x[:, 5:6] * (0 if agnostic else max_wh)  # 多类别中应用NMS 
+        boxes, scores = x[:, :4] + c, x[:, 4]  # 多类别NMS（非极大值抑制）的处理策略是为了让每个类都能独立执行NMS，在所有的边框上添加一个偏移量。偏移量仅取决于类的ID（也就是x[:, 5:6]），并且足够大，以便来自不同类的框不会重叠。
+        i = torchvision.ops.nms(boxes, scores, iou_thres)  # 调库，boxes形状是(剩下的box数目,4) scores是一维的长度box数目相同
+        i = i[:max_det]  # limit detections  i是整型64张量，指示被保留的框的index，另外是按照得分（置信度）从高到低排列。
         if merge and (1 < n < 3E3):  # Merge NMS (boxes merged using weighted mean)
             # update boxes as boxes(i,4) = weights(i,n) * boxes(n,4)
             iou = box_iou(boxes[i], boxes) > iou_thres  # iou matrix
